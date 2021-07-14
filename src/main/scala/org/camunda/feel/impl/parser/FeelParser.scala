@@ -17,7 +17,6 @@
 package org.camunda.feel.impl.parser
 
 import fastparse.JavaWhitespace._
-import fastparse.Parsed.Success
 import fastparse._
 import org.camunda.feel._
 import org.camunda.feel.syntaxtree._
@@ -47,16 +46,18 @@ object FeelParser {
   private def reservedWord[_: P] =
     P(
       StringIn("null",
-               "true",
-               "false",
-               "function",
-               "if",
-               "then",
-               "else",
-               "for",
-               "between",
-               "instance",
-               "of"))
+        "true",
+        "false",
+        "function",
+        "if",
+        "then",
+        "else",
+        "for",
+        "between",
+        "instance",
+        "of",
+        "some",
+        "every"))
 
   // list of built-in function names with whitespaces
   // -- other names match the 'function name' pattern
@@ -119,10 +120,16 @@ object FeelParser {
 
   // 2 a)
   private def textualExpression[_: P]: P[Exp] =
-    P(expressionInParentheses | functionDefinition | forExpression | ifExpression | quantifiedExpression | expression2)
+    P(expressionWithContinuation | functionDefinition | forExpression | ifExpression | quantifiedExpression | expression2)
 
-  private def expressionInParentheses[_: P]: P[Exp] =
-    P("(" ~ expression ~ ")").flatMap(continuation)
+  private def expressionWithContinuation[_: P]: P[Exp] =
+    P(
+      "(" ~ expression ~ ")" |
+        variableExpression |
+        list |
+        context |
+        functionInvocation
+    ).flatMap(continuation)
 
   // optimize parsing the expression from left to right by using `flapMap()`
   // `flatMap()` takes the parsed (left) part of the expression and continues with the (right) part
@@ -142,6 +149,10 @@ object FeelParser {
   private def pathContinuation[_: P](base: Exp): P[Exp] =
     P(("." ~ name).rep(1))
       .map(ops => ops.foldLeft(base)(PathExpression))
+
+  // an (escaped) identifier but not the name of a function invocation or path expression
+  private def variableExpression[_: P]: P[Exp] =
+    P((identifier.! | escapedIdentifier) ~ !"(").map(n => Ref(List(n)))
 
   // 2b)
   private def expression2[_: P]: P[Exp] = P(disjunction)
@@ -483,7 +494,7 @@ object FeelParser {
   // 52
   private def filteredExpression9[_: P]: P[Exp] =
     P(expression9.flatMap(x =>
-      ("[" ~/ expression ~ "]").?.map(_.fold(x)(filterExp =>
+      ("[" ~ expression ~ "]").?.map(_.fold(x)(filterExp =>
         Filter(x, filterExp)))))
 
   // 40
